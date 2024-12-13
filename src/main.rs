@@ -1,4 +1,5 @@
 use base64::decode;
+use serde::Deserialize;
 use std::process::Stdio;
 use tokio::{fs::File, io::AsyncWriteExt, process::Command};
 
@@ -10,6 +11,12 @@ use axum::{
 };
 
 use futures_util::TryStreamExt;
+
+#[derive(Deserialize, Clone)]
+struct RequestFormat {
+    file_name: String,
+    video_data: String,
+}
 
 async fn handle_ws(ws: WebSocketUpgrade) -> impl IntoResponse {
     println!("--> {:12} - Accessed /ws", "HANDLER");
@@ -31,13 +38,22 @@ async fn handle_socket(mut socket: WebSocket) {
             //         break;
             //     }
             // },
-            axum::extract::ws::Message::Text(base64_data) => {
-                println!("Received Base64 data of size: {}", base64_data.len());
+            axum::extract::ws::Message::Text(req_data) => {
+                println!("--> {:12} - Received data from client", "LOG");
 
-                //match decode_and_save_file("received_video.png", base64_data).await {
-                match decode_and_save_file("received_video.mp4", base64_data).await {
-                    Ok(_) => println!("File saved successfully: received_video.mp4"),
-                    Err(err) => eprintln!("Error saving file: {}", err),
+                match serde_json::from_str::<RequestFormat>(&req_data) {
+                    Ok(request) => {
+                        println!("File name: {}", request.file_name);
+                        println!("Video data size: {}", request.video_data.len());
+
+                        match decode_and_save_file(request.clone()).await {
+                            Ok(_) => println!("File saved successfully: {}", request.file_name),
+                            Err(err) => eprintln!("Error saving file: {}", err),
+                        }
+                    }
+                    Err(err) => {
+                        println!("Error parsing JSON: {}", err);
+                    }
                 }
             }
             axum::extract::ws::Message::Binary(data) => {
@@ -55,10 +71,8 @@ async fn handle_socket(mut socket: WebSocket) {
     }
 }
 
-async fn decode_and_save_file(
-    file_path: &str,
-    base64_data: String,
-) -> Result<(), Box<dyn std::error::Error>> {
+async fn decode_and_save_file(request: RequestFormat) -> Result<(), Box<dyn std::error::Error>> {
+    let base64_data = &request.video_data;
     let base64_data = if let Some(index) = base64_data.find(",") {
         &base64_data[index + 1..]
     } else {
@@ -66,9 +80,8 @@ async fn decode_and_save_file(
     };
 
     let binary_data = decode(base64_data)?;
-
-    // ファイルに書き込む
-    let mut file = File::create(file_path).await?;
+    let full_path = format!("./uploads/{}", request.file_name);
+    let mut file = File::create(full_path).await?;
     file.write_all(&binary_data).await?;
     file.flush().await?;
     Ok(())
