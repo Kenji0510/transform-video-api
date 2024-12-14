@@ -18,6 +18,7 @@ use futures_util::TryStreamExt;
 #[derive(Deserialize, Clone)]
 struct RequestFormat {
     file_name: String,
+    video_quality_number: i32,
     video_data: String,
 }
 
@@ -41,6 +42,7 @@ async fn handle_socket(mut socket: WebSocket) {
                 match serde_json::from_str::<RequestFormat>(&req_data) {
                     Ok(request) => {
                         println!("File name: {}", request.file_name);
+                        println!("Video quality number: {}", request.video_quality_number);
                         println!("Video data size: {}", request.video_data.len());
 
                         match decode_and_save_file(request.clone()).await {
@@ -75,7 +77,12 @@ async fn handle_socket(mut socket: WebSocket) {
                             }
                         }
 
-                        match call_ffmpeg_for_hevc(request.file_name.clone()).await {
+                        match call_ffmpeg_for_hevc(
+                            request.file_name.clone(),
+                            request.video_quality_number.clone(),
+                        )
+                        .await
+                        {
                             Ok(output_path) => {
                                 println!("FFmpeg program executed successfully");
 
@@ -185,19 +192,29 @@ async fn decode_and_save_file(request: RequestFormat) -> Result<(), String> {
     Ok(())
 }
 
-async fn call_ffmpeg_for_hevc(video_name: String) -> Result<String, String> {
-    let command = "ffmpeg";
+async fn call_ffmpeg_for_hevc(
+    video_name: String,
+    video_quality_number: i32,
+) -> Result<String, String> {
     let input_file = format!("./uploads/{}", video_name);
     let output_path = format!("./transform_data/output.mp4");
+    let preset = match video_quality_number {
+        0 => "ultrafast",
+        1 => "fast",
+        2 => "slow",
+        _ => "fast",
+    };
+    let command = "ffmpeg";
     let args = [
         "-i",
         &input_file,
         "-c:v",
         "libx265",
         "-preset",
-        "faster",
+        // "faster",
+        preset,
         "-crf",
-        "28",
+        "25",
         "-c:a",
         "aac",
         &output_path,
